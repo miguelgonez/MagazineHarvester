@@ -1,0 +1,54 @@
+Veo que todavía obtenemos el error 403. Intentemos una solución más robusta usando Selenium con un manejo más completo de la sesión:
+pythonCopyfrom selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+import time
+import random
+
+def get_available_volumes():
+    options = Options()
+    options.add_argument('--headless')
+    options.add_argument('--no-sandbox')
+    options.add_argument('--disable-dev-shm-usage')
+    
+    # Agregar user agent aleatorio
+    user_agents = [
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:89.0) Gecko/20100101 Firefox/89.0'
+    ]
+    options.add_argument(f'user-agent={random.choice(user_agents)}')
+    
+    try:
+        driver = webdriver.Chrome(options=options)
+        
+        # Configurar timeouts
+        driver.set_page_load_timeout(30)
+        wait = WebDriverWait(driver, 20)
+        
+        # Añadir delay aleatorio
+        time.sleep(random.uniform(2, 5))
+        
+        # Intentar acceder a la página
+        driver.get('https://meridian.allenpress.com/jooph/list-of-issues')
+        
+        # Esperar a que cargue algún elemento específico
+        wait.until(EC.presence_of_element_located((By.CLASS_NAME, 'issue-item')))
+        
+        # Obtener el contenido
+        content = driver.page_source
+        
+        # Procesar el contenido aquí...
+        # volumes = process_content(content)
+        
+        return volumes
+        
+    except Exception as e:
+        print(f"Error detallado: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+        
+    finally:
+        if 'driver' in locals():
+            driver.quit()

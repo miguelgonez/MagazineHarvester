@@ -1,0 +1,90 @@
+from requests_html import HTMLSession
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
+        self.session = HTMLSession()
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            # Hacer la petición
+            response = self.session.get(url, headers=self.headers)
+            
+            # Renderizar JavaScript
+            response.html.render(timeout=20)
+            
+            # Encontrar artículos
+            articles = []
+            
+            # Buscar elementos por XPath
+            article_elements = response.html.xpath('//div[contains(@class, "article-item")]')
+            st.write(f"Elementos de artículo encontrados: {len(article_elements)}")
+            
+            for article in article_elements:
+                try:
+                    # Obtener título
+                    title = article.find('h2 a', first=True)
+                    title_text = title.text if title else None
+                    
+                    # Obtener DOI
+                    doi = article.xpath('//div[contains(text(), "DOI:")]', first=True)
+                    doi_text = doi.text.replace('DOI:', '').strip() if doi else None
+                    
+                    # Obtener PDF
+                    pdf_link = article.find('a[text*="PDF"]', first=True)
+                    pdf_url = pdf_link.attrs.get('href', '') if pdf_link else None
+                    
+                    if pdf_url and not pdf_url.startswith('http'):
+                        pdf_url = f"https://www.jofph.com{pdf_url}"
+                    
+                    # Extraer volumen e issue de la URL
+                    url_parts = url.split('/')[-1].split('-')
+                    volume = int(url_parts[0].replace('articles/', ''))
+                    issue = int(url_parts[1]) if len(url_parts) > 1 else 1
+                    
+                    if title_text and pdf_url:
+                        article_info = {
+                            'title': title_text,
+                            'doi': doi_text,
+                            'pdf_url': pdf_url,
+                            'volume': volume,
+                            'issue': issue
+                        }
+                        articles.append(article_info)
+                        st.write(f"Artículo encontrado: {title_text}")
+                        
+                except Exception as e:
+                    st.write(f"Error procesando artículo individual: {str(e)}")
+                    continue
+            
+            st.write(f"Total artículos encontrados: {len(articles)}")
+            return articles
+            
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False

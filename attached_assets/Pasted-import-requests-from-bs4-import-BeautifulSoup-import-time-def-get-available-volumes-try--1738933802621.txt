@@ -1,0 +1,80 @@
+import requests
+from bs4 import BeautifulSoup
+import time
+
+def get_available_volumes():
+    try:
+        url = "https://www.jofph.com/articles/archive"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://www.jofph.com/',
+        }
+        
+        session = requests.Session()
+        response = session.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            volumes = []
+            
+            # Basándonos en la estructura de la imagen
+            # Buscamos las tarjetas de los volúmenes que tienen la imagen de portada
+            volume_items = soup.find_all('div', {'class': lambda x: x and 'card' in x})
+            
+            for item in volume_items:
+                # Extraer información de cada volumen
+                volume_link = item.find('a', href=True)
+                title = item.find('h3')
+                
+                if volume_link and title:
+                    volume_info = {
+                        'title': title.text.strip(),
+                        'link': volume_link['href'] if not volume_link['href'].startswith('http') 
+                               else volume_link['href'],
+                        'cover_image': item.find('img')['src'] if item.find('img') else None
+                    }
+                    volumes.append(volume_info)
+            
+            return volumes
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Error de conexión: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+    except Exception as e:
+        print(f"Error general: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+
+# Función adicional para obtener los PDFs de un volumen específico
+def get_volume_pdfs(volume_url):
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        }
+        
+        response = requests.get(volume_url, headers=headers)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            articles = []
+            # Buscar los enlaces PDF basándonos en la estructura mostrada en la imagen
+            for article in soup.find_all('div', class_='article-item'):
+                pdf_link = article.find('a', text='PDF')
+                title = article.find('h2')
+                
+                if pdf_link and title:
+                    articles.append({
+                        'title': title.text.strip(),
+                        'pdf_url': pdf_link['href'],
+                        'doi': article.find('span', text='DOI:').next_sibling.strip() if article.find('span', text='DOI:') else None
+                    })
+            
+            return articles
+            
+    except Exception as e:
+        print(f"Error getting volume PDFs: {str(e)}")
+        return []

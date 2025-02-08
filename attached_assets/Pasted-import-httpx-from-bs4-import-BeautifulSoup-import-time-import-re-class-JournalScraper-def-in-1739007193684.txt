@@ -1,0 +1,102 @@
+import httpx
+from bs4 import BeautifulSoup
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        }
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            with httpx.Client(headers=self.headers, follow_redirects=True) as client:
+                response = client.get(url)
+                st.write(f"Status code: {response.status_code}")
+                
+                soup = BeautifulSoup(response.text, 'html.parser')
+                articles = []
+
+                # Extraer volumen e issue de la URL
+                url_parts = url.split('/')[-1].split('-')
+                volume = int(url_parts[0].replace('articles/', ''))
+                issue = int(url_parts[1]) if len(url_parts) > 1 else 1
+
+                # Buscar todos los elementos que tengan "Abstract" y "PDF" como enlaces
+                article_containers = soup.find_all(lambda tag: tag.name == 'div' and 
+                    tag.find('a', string='Abstract') and 
+                    tag.find('a', string='PDF'))
+
+                st.write(f"Contenedores de artículos encontrados: {len(article_containers)}")
+
+                for container in article_containers:
+                    try:
+                        # Buscar el título (usualmente es el primer enlace antes de Abstract/PDF)
+                        title_link = container.find('a', href=lambda x: x and ('abstract' in x.lower() or 'fulltext' in x.lower()))
+                        if not title_link:
+                            continue
+                            
+                        title = title_link.text.strip()
+                        
+                        # Buscar DOI (suele estar después del título)
+                        doi_text = container.find(text=re.compile(r'10\.22514/jofph\.\d{4}\.\d{3}'))
+                        doi = doi_text.strip() if doi_text else None
+                        
+                        # Obtener enlace PDF
+                        pdf_link = container.find('a', string='PDF')
+                        if not pdf_link:
+                            continue
+                            
+                        pdf_url = pdf_link.get('href')
+                        if pdf_url and not pdf_url.startswith('http'):
+                            pdf_url = f"https://www.jofph.com{pdf_url}"
+                        
+                        article_info = {
+                            'title': title,
+                            'doi': doi,
+                            'pdf_url': pdf_url,
+                            'volume': volume,
+                            'issue': issue
+                        }
+                        
+                        articles.append(article_info)
+                        st.write(f"Artículo encontrado: {title}")
+                        
+                    except Exception as e:
+                        st.write(f"Error procesando artículo individual: {str(e)}")
+                        continue
+
+                st.write(f"Total artículos encontrados: {len(articles)}")
+                
+                # Debug: Mostrar una parte del HTML para ver la estructura
+                st.write("\nEstructura HTML de ejemplo:")
+                example_html = soup.find(lambda tag: tag.name == 'div' and 
+                    tag.find('a', string='Abstract'))
+                if example_html:
+                    st.code(str(example_html)[:500])
+                
+                return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            with httpx.Client(headers=self.headers) as client:
+                response = client.get(pdf_url)
+                response.raise_for_status()
+                
+                with open(filepath, 'wb') as f:
+                    f.write(response.content)
+                return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False

@@ -1,0 +1,202 @@
+import streamlit as st
+import os
+from scraper import JournalScraper
+from db_manager import DatabaseManager
+from chat_manager import ChatManager
+import time
+import re
+import PyPDF2
+
+# Inicializar variables de estado de la sesión
+if 'download_status' not in st.session_state:
+    st.session_state.download_status = {}
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = {}
+
+# Configuración de la página
+st.set_page_config(
+    page_title="Journal PDF Downloader",
+    page_icon="📚",
+    layout="wide"
+)
+
+# Asegurarse de que el directorio 'pdfs' exista
+os.makedirs('pdfs', exist_ok=True)
+
+# Inicializar componentes
+db = DatabaseManager('journal_downloads.db')
+scraper = JournalScraper()
+chat_manager = ChatManager()
+
+def extract_pdf_text(pdf_path: str) -> str:
+    """Extrae el texto de un archivo PDF."""
+    try:
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            text = ""
+            for page in reader.pages:
+                # Si extract_text() retorna None, se usa cadena vacía
+                page_text = page.extract_text() or ""
+                text += page_text + "\n"
+            return text
+    except Exception as e:
+        st.error(f"Error al extraer el texto del PDF: {e}")
+        return ""
+
+def main():
+    st.title("📚 Journal PDF Downloader")
+
+    # Pestañas para diferentes funcionalidades
+    tab1, tab2 = st.tabs(["Descargar PDFs", "Chat con PDFs"])
+
+    with tab1:
+        st.markdown(
+            """
+            Ingresa la URL del volumen que deseas descargar.
+            Ejemplo: www.jofph.com/articles/38-1
+            """
+        )
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            url = st.text_input(
+                "URL del Volumen:",
+                placeholder="www.jofph.com/articles/38-1"
+            )
+
+            if url:
+                try:
+                    with st.spinner('Cargando artículos disponibles...'):
+                        articles = scraper.get_articles_from_url(url)
+
+                    if articles:
+                        st.subheader(f"Artículos disponibles ({len(articles)})")
+
+                        # Botón para descargar todos los PDFs
+                        if st.button("Descargar todos los PDFs"):
+                            for article in articles:
+                                try:
+                                    with st.spinner(f'Descargando: {article["title"]}'):
+                                        volume_dir = os.path.join('pdfs', f'volumen_{article["volume"]}')
+                                        os.makedirs(volume_dir, exist_ok=True)
+
+                                        filename = f"vol_{article['volume']}_issue_{article['issue']}_{article['doi'].replace('/', '_') if article['doi'] else 'articulo'}.pdf"
+                                        filepath = os.path.join(volume_dir, filename)
+
+                                        if not os.path.exists(filepath):
+                                            success = scraper.download_pdf(article['pdf_url'], filepath)
+                                            if success:
+                                                db.add_download(article['volume'], article['issue'], filepath)
+                                                st.success(f"✅ Descargado: {filename}")
+                                            else:
+                                                st.error(f"❌ Error al descargar: {filename}")
+                                        else:
+                                            st.info(f"📄 Ya existe: {filename}")
+                                except Exception as e:
+                                    st.error(f"Error: {e}")
+
+                        # Listar artículos individualmente
+                        for article in articles:
+                            with st.container():
+                                st.markdown(f"**{article['title']}**")
+                                if article['doi']:
+                                    st.markdown(f"DOI: {article['doi']}")
+
+                                if st.button("Descargar PDF", key=f"btn_{article['doi'] or article['title']}"):
+                                    try:
+                                        with st.spinner('Descargando PDF...'):
+                                            volume_dir = os.path.join('pdfs', f'volumen_{article["volume"]}')
+                                            os.makedirs(volume_dir, exist_ok=True)
+
+                                            filename = f"vol_{article['volume']}_issue_{article['issue']}_{article['doi'].replace('/', '_') if article['doi'] else 'articulo'}.pdf"
+                                            filepath = os.path.join(volume_dir, filename)
+
+                                            if not os.path.exists(filepath):
+                                                success = scraper.download_pdf(article['pdf_url'], filepath)
+                                                if success:
+                                                    db.add_download(article['volume'], article['issue'], filepath)
+                                                    st.success(f"PDF descargado exitosamente: {filename}")
+                                                else:
+                                                    st.error("Error al descargar el PDF")
+                                            else:
+                                                st.info(f"El archivo ya existe: {filename}")
+                                    except Exception as e:
+                                        st.error(f"Error: {e}")
+                                st.markdown("---")
+                    else:
+                        st.warning("No se encontraron artículos en esta URL.")
+                except Exception as e:
+                    st.error(f"Error al cargar los artículos: {e}")
+
+        with col2:
+            st.subheader("Estadísticas")
+            stats = db.get_statistics()
+            st.metric("Total Descargas", stats['total_downloads'])
+            st.metric("Total Volúmenes", stats['total_volumes'])
+            st.metric("Tasa de Éxito", f"{stats['success_rate']:.1f}%")
+
+            st.subheader("Historial de Descargas")
+            history = db.get_download_history(5)
+            for entry in history:
+                st.text(f"Volumen {entry[0]}, Issue {entry[1]} - {entry[2]}")
+
+    with tab2:
+        st.subheader("💬 Chat con PDFs")
+
+        # Listar PDFs disponibles
+        pdf_files = []
+        for root, dirs, files in os.walk('pdfs'):
+            for file in files:
+                if file.endswith('.pdf'):
+                    pdf_files.append(os.path.join(root, file))
+
+        if not pdf_files:
+            st.warning("No hay PDFs disponibles. Por favor, descarga algunos artículos primero.")
+            return
+
+        # Seleccionar PDF para chatear
+        selected_pdf = st.selectbox(
+            "Selecciona un PDF para chatear:",
+            pdf_files,
+            format_func=lambda x: os.path.basename(x)
+        )
+
+        if selected_pdf:
+            # Crear columnas para la interfaz de chat
+            chat_col, history_col = st.columns([2, 1])
+
+            with chat_col:
+                # Interfaz de chat
+                user_message = st.text_area("Haz una pregunta sobre el artículo:", height=100)
+
+                if st.button("Enviar"):
+                    if not os.environ.get("OPENAI_API_KEY"):
+                        st.error("Por favor, configura la variable de entorno OPENAI_API_KEY.")
+                        return
+
+                    with st.spinner("Procesando tu pregunta..."):
+                        # Extraer texto del PDF
+                        pdf_text = extract_pdf_text(selected_pdf)
+                        if pdf_text:
+                            # Obtener respuesta de ChatGPT
+                            response = chat_manager.chat_with_pdf(pdf_text, user_message)
+                            # Almacenar en la base de datos
+                            db.add_chat_history(selected_pdf, user_message, response)
+                            # Mostrar respuesta
+                            st.write("Respuesta:", response)
+                        else:
+                            st.error("No se pudo extraer el texto del PDF.")
+
+            with history_col:
+                # Mostrar historial de chat
+                st.subheader("Historial de Chat")
+                history = db.get_chat_history(selected_pdf)
+                for msg in history:
+                    with st.expander(f"Pregunta: {msg[0][:50]}..."):
+                        st.write("Pregunta:", msg[0])
+                        st.write("Respuesta:", msg[1])
+                        st.write("Hora:", msg[2])
+
+if __name__ == "__main__":
+    main()

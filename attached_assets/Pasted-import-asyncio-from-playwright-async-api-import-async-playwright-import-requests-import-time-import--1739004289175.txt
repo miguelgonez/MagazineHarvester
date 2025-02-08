@@ -1,0 +1,106 @@
+import asyncio
+from playwright.async_api import async_playwright
+import requests
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0'
+        }
+
+    def get_articles_from_url(self, url):
+        return asyncio.run(self._get_articles_async(url))
+
+    async def _get_articles_async(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            async with async_playwright() as p:
+                # Iniciar navegador
+                browser = await p.chromium.launch(headless=True)
+                context = await browser.new_context()
+                page = await context.new_page()
+                
+                # Ir a la URL
+                await page.goto(url)
+                # Esperar a que la página cargue
+                await page.wait_for_load_state('networkidle')
+                
+                # Esperar elementos específicos
+                await page.wait_for_selector('.article-title', timeout=10000)
+                
+                articles = []
+                
+                # Obtener todos los artículos
+                article_elements = await page.query_selector_all('article, .article-item, .paper-item')
+                st.write(f"Elementos de artículo encontrados: {len(article_elements)}")
+
+                for article in article_elements:
+                    try:
+                        # Obtener título
+                        title_elem = await article.query_selector('.article-title, h2 a')
+                        title = await title_elem.text_content() if title_elem else None
+                        
+                        # Obtener DOI
+                        doi_elem = await article.query_selector('text=/10\.22514\/jofph\.\d{4}\.\d{3}/')
+                        doi = await doi_elem.text_content() if doi_elem else None
+                        
+                        # Obtener enlace PDF
+                        pdf_elem = await article.query_selector('a:has-text("PDF")')
+                        pdf_url = await pdf_elem.get_attribute('href') if pdf_elem else None
+                        
+                        if pdf_url and not pdf_url.startswith('http'):
+                            pdf_url = f"https://www.jofph.com{pdf_url}"
+                        
+                        # Extraer volumen e issue de la URL
+                        url_parts = url.split('/')[-1].split('-')
+                        volume = int(url_parts[0].replace('articles/', ''))
+                        issue = int(url_parts[1]) if len(url_parts) > 1 else 1
+
+                        if title and pdf_url:
+                            article_info = {
+                                'title': title.strip(),
+                                'doi': doi.strip() if doi else None,
+                                'pdf_url': pdf_url,
+                                'volume': volume,
+                                'issue': issue
+                            }
+                            articles.append(article_info)
+                            st.write(f"Artículo encontrado: {title}")
+
+                    except Exception as e:
+                        st.write(f"Error procesando artículo individual: {str(e)}")
+                        continue
+
+                # Debug: Mostrar el contenido HTML
+                content = await page.content()
+                st.write("Primeros 500 caracteres del HTML cargado:")
+                st.write(content[:500])
+                
+                await browser.close()
+                st.write(f"Total artículos encontrados: {len(articles)}")
+                return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            session = requests.Session()
+            response = session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False

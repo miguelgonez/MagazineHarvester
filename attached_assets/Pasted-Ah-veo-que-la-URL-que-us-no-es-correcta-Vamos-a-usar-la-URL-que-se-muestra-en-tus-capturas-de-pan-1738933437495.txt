@@ -1,0 +1,77 @@
+Ah, veo que la URL que usé no es correcta. Vamos a usar la URL que se muestra en tus capturas de pantalla:
+pythonCopyimport requests
+from bs4 import BeautifulSoup
+import time
+
+def get_available_volumes():
+    try:
+        # URL correcta basada en las imágenes
+        url = "https://mrepress.com/jofph/archive"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Referer': 'https://mrepress.com/',
+        }
+        
+        session = requests.Session()
+        response = session.get(url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Extraer volúmenes basándonos en la estructura vista en las imágenes
+            volumes = []
+            
+            # Buscar los artículos por año
+            year_section = soup.find('h2', text='2024')
+            if year_section:
+                # Encontrar los volúmenes bajo ese año
+                volume_cards = year_section.find_next_siblings('div', class_='card')
+                
+                for card in volume_cards:
+                    volume_info = {
+                        'volume': card.find('h3').text if card.find('h3') else '',
+                        'date': card.find('p', class_='date').text if card.find('p', class_='date') else '',
+                        'link': card.find('a')['href'] if card.find('a') else None
+                    }
+                    volumes.append(volume_info)
+            
+            return volumes
+            
+    except requests.exceptions.RequestException as e:
+        print(f"Error de conexión: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+    except Exception as e:
+        print(f"Error general: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+También podríamos probar con una aproximación usando playwright que suele ser más robusta:
+pythonCopyfrom playwright.sync_api import sync_playwright
+import time
+
+def get_available_volumes():
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page()
+            
+            # Navegar a la página
+            page.goto("https://mrepress.com/jofph/archive")
+            page.wait_for_load_state('networkidle')
+            
+            # Extraer información
+            volumes = page.eval_on_selector_all('.card', '''
+                (elements) => elements.map(el => ({
+                    volume: el.querySelector('h3')?.textContent || '',
+                    date: el.querySelector('.date')?.textContent || '',
+                    link: el.querySelector('a')?.href || null
+                }))
+            ''')
+            
+            browser.close()
+            return volumes
+            
+    except Exception as e:
+        print(f"Error detallado: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")

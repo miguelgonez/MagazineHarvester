@@ -1,0 +1,107 @@
+import requests
+from bs4 import BeautifulSoup
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        }
+        self.session = requests.Session()
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            response = self.session.get(url, headers=self.headers)
+            st.write(f"Status code: {response.status_code}")
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            articles = []
+
+            # Buscar todos los elementos con "Open Access"
+            open_access_elements = soup.find_all('div', class_='Open Access')
+            st.write(f"Elementos Open Access encontrados: {len(open_access_elements)}")
+
+            # Buscar links de Abstract y PDF
+            article_sections = soup.find_all(['a'], text=lambda t: t and ('Abstract' in t or 'PDF' in t))
+            st.write(f"Enlaces Abstract/PDF encontrados: {len(article_sections)}")
+
+            # Iterar sobre cada artículo
+            article_titles = soup.find_all(['a'], href=lambda h: h and ('abstract' in h.lower() or 'fulltext' in h.lower()))
+            st.write(f"Títulos de artículos encontrados: {len(article_titles)}")
+
+            for title_elem in article_titles:
+                try:
+                    # Encontrar el contenedor padre que tiene toda la información del artículo
+                    article_container = title_elem.find_parent('div')
+                    
+                    if not article_container:
+                        continue
+
+                    # Obtener el título
+                    title = title_elem.text.strip()
+
+                    # Buscar el DOI cerca del título
+                    doi = None
+                    doi_text = article_container.find(text=re.compile(r'10\.22514/jofph\.\d{4}\.\d{3}'))
+                    if doi_text:
+                        doi = doi_text.strip()
+
+                    # Buscar el enlace PDF
+                    pdf_link = article_container.find('a', text='PDF')
+                    pdf_url = None
+                    if pdf_link and pdf_link.get('href'):
+                        pdf_url = pdf_link['href']
+                        if not pdf_url.startswith('http'):
+                            pdf_url = f"https://www.jofph.com{pdf_url}"
+
+                    # Extraer volumen e issue de la URL
+                    url_parts = url.split('/')[-1].split('-')
+                    volume = int(url_parts[0].replace('articles/', ''))
+                    issue = int(url_parts[1]) if len(url_parts) > 1 else 1
+
+                    if title and pdf_url:
+                        article_info = {
+                            'title': title,
+                            'doi': doi,
+                            'pdf_url': pdf_url,
+                            'volume': volume,
+                            'issue': issue
+                        }
+                        articles.append(article_info)
+                        st.write(f"Artículo encontrado: {title}")
+
+                except Exception as e:
+                    st.write(f"Error procesando artículo individual: {str(e)}")
+                    continue
+
+            st.write(f"Total artículos encontrados: {len(articles)}")
+            
+            # Debug: Mostrar parte del HTML para análisis
+            st.write("Primeros 500 caracteres del HTML:")
+            st.write(soup.prettify()[:500])
+            
+            return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False

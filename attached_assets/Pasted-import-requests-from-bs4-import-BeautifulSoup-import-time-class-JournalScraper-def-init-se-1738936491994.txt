@@ -1,0 +1,85 @@
+import requests
+from bs4 import BeautifulSoup
+import time
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        }
+        self.session = requests.Session()
+    
+    def get_articles_from_url(self, url):
+        try:
+            # Asegurarnos de que la URL es completa
+            if not url.startswith('http'):
+                url = f'https://{url}'
+            
+            response = self.session.get(url, headers=self.headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            articles = []
+            
+            # Buscar todos los artículos en la página
+            for article in soup.find_all(['div', 'article'], {'class': lambda x: x and any(c in str(x).lower() for c in ['article', 'paper'])}):
+                try:
+                    # Extraer el DOI que sigue el formato "10.22514/jofph.2024.XXX"
+                    doi_element = article.find(text=lambda t: t and 'DOI:' in t)
+                    doi = doi_element.find_next(text=True).strip() if doi_element else None
+                    if not doi:
+                        doi_text = article.find(text=lambda t: t and '10.22514/jofph' in t)
+                        doi = doi_text.strip() if doi_text else None
+                    
+                    # Encontrar el enlace PDF
+                    pdf_link = article.find('a', href=lambda h: h and '.pdf' in h.lower() or 'pdf' in h.lower())
+                    if not pdf_link:
+                        pdf_link = article.find('a', text=lambda t: t and 'PDF' in t)
+                    
+                    if pdf_link:
+                        # Extraer el volumen y número del DOI o de la URL
+                        volume = None
+                        issue = None
+                        if doi:
+                            match = re.search(r'jofph\.(\d{4})\.(\d+)', doi)
+                            if match:
+                                volume = int(url.split('/')[-1].split('-')[0])
+                                issue = int(url.split('/')[-1].split('-')[1])
+                        
+                        title = article.find(['h1', 'h2', 'h3']).text.strip() if article.find(['h1', 'h2', 'h3']) else "Untitled"
+                        
+                        pdf_url = pdf_link.get('href', '')
+                        if not pdf_url.startswith('http'):
+                            pdf_url = f"https://www.jofph.com{pdf_url}" if not pdf_url.startswith('/') else f"https://www.jofph.com{pdf_url}"
+                        
+                        articles.append({
+                            'title': title,
+                            'doi': doi,
+                            'pdf_url': pdf_url,
+                            'volume': volume,
+                            'issue': issue
+                        })
+                except Exception as e:
+                    print(f"Error processing article: {str(e)}")
+                    continue
+            
+            return articles
+            
+        except Exception as e:
+            print(f"Error fetching articles: {str(e)}")
+            raise
+    
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            print(f"Error downloading PDF: {str(e)}")
+            return False

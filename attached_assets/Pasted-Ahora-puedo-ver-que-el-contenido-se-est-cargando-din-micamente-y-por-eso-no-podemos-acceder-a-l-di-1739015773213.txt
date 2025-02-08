@@ -1,0 +1,130 @@
+Ahora puedo ver que el contenido se está cargando dinámicamente y por eso no podemos acceder a él directamente. Vamos a intentar obtener primero el estado inicial de la página y luego hacer una petición a la API específica que veo en las herramientas de desarrollo:
+pythonCopyimport requests
+import json
+import re
+import time
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Origin': 'https://www.jofph.com',
+            'Referer': 'https://www.jofph.com/',
+            'x-requested-with': 'XMLHttpRequest'
+        }
+        self.session = requests.Session()
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+            
+            st.write(f"Accediendo a: {url}")
+            
+            # Extraer volumen e issue de la URL
+            match = re.search(r'/(\d+)-(\d+)$', url)
+            if not match:
+                st.error("URL no válida")
+                return []
+                
+            volume, issue = match.groups()
+            
+            # Construir la URL específica para el volumen
+            data_url = f"https://www.jofph.com/_nuxt/static/articles-{volume}-{issue}.json"
+            st.write(f"Intentando obtener datos de: {data_url}")
+            
+            try:
+                response = self.session.get(data_url, headers=self.headers)
+                if response.status_code == 200:
+                    articles_data = response.json()
+                    st.write("Datos JSON obtenidos correctamente")
+                else:
+                    # Intento alternativo con una estructura diferente de URL
+                    data_url = f"https://www.jofph.com/api/v1/volumes/{volume}/issues/{issue}/articles"
+                    st.write(f"Intentando URL alternativa: {data_url}")
+                    response = self.session.get(data_url, headers=self.headers)
+            
+            except Exception as e:
+                st.error(f"Error obteniendo datos: {str(e)}")
+                # Mostrar los primeros bytes de la respuesta para debug
+                st.write("Contenido de respuesta (primeros 500 bytes):")
+                st.write(response.content[:500])
+                return []
+            
+            articles = []
+            
+            # Intentar extraer artículos del JSON
+            try:
+                if response.status_code == 200:
+                    data = response.json()
+                    
+                    if isinstance(data, list):
+                        articles_data = data
+                    else:
+                        articles_data = data.get('articles', [])
+                    
+                    for article in articles_data:
+                        article_info = {
+                            'title': article.get('title'),
+                            'doi': article.get('doi'),
+                            'pdf_url': article.get('pdf_url', article.get('pdfUrl')),
+                            'volume': int(volume),
+                            'issue': int(issue)
+                        }
+                        
+                        if article_info['title'] and article_info['pdf_url']:
+                            if not article_info['pdf_url'].startswith('http'):
+                                article_info['pdf_url'] = f"https://www.jofph.com{article_info['pdf_url']}"
+                            
+                            articles.append(article_info)
+                            st.write(f"Artículo encontrado: {article_info['title']}")
+            
+            except Exception as e:
+                st.error(f"Error procesando JSON: {str(e)}")
+                st.write("Contenido de respuesta JSON:")
+                st.write(response.text[:500])
+            
+            st.write(f"Total artículos encontrados: {len(articles)}")
+            return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers={
+                'User-Agent': self.headers['User-Agent'],
+                'Accept': 'application/pdf',
+                'Referer': 'https://www.jofph.com/'
+            }, stream=True)
+            
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False
+Cuando uses este código, ¿podrías hacer lo siguiente en tu navegador?:
+
+Abre la página del volumen
+Presiona F12 para abrir las herramientas de desarrollo
+Ve a la pestaña "Network"
+Marca la casilla "XHR" o "Fetch"
+Recarga la página
+Busca las peticiones que se hacen (especialmente aquellas que terminen en .json o tengan "articles" en la URL)
+Haz clic en alguna de esas peticiones y comparte:
+
+La URL exacta de la petición
+Los headers que se envían
+Un ejemplo de la respuesta
+
+
+
+Esto me ayudará a ajustar el código para que coincida exactamente con cómo la página está obteniendo los datos.

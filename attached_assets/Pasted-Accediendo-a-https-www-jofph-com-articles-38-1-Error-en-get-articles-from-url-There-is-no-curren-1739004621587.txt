@@ -1,0 +1,154 @@
+Accediendo a: https://www.jofph.com/articles/38-1
+Error en get_articles_from_url: There is no current event loop in thread 'ScriptRunner.scriptThread'.
+Error al cargar los artículos: There is no current event loop in thread 'ScriptRunner.scriptThread'.
+
+
+Ah, veo que hay un problema con el event loop. Vamos a modificar el código para usar httpx que es más simple y no requiere event loop:
+
+python
+
+Copy
+import httpx
+from bs4 import BeautifulSoup
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Referer': 'https://www.jofph.com/',
+            'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
+        }
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            # Primera petición para obtener la página
+            with httpx.Client(headers=self.headers, follow_redirects=True) as client:
+                response = client.get(url)
+                st.write(f"Status code: {response.status_code}")
+                
+                if response.status_code != 200:
+                    st.error(f"Error en la respuesta: {response.status_code}")
+                    return []
+
+                # Intentar extraer el ID de la página o cualquier token necesario
+                soup = BeautifulSoup(response.text, 'html.parser')
+                
+                # Buscar los artículos
+                articles = []
+                
+                # Buscar las diferentes secciones que podrían contener artículos
+                sections = ['Systematic reviews', 'Original Research', 'Case Report']
+                
+                for section in sections:
+                    section_header = soup.find(string=lambda text: text and section in text)
+                    if section_header:
+                        st.write(f"Encontrada sección: {section}")
+                        current_section = section_header.find_parent()
+                        
+                        # Buscar artículos después del encabezado de la sección
+                        while current_section and current_section.find_next_sibling():
+                            current_section = current_section.find_next_sibling()
+                            
+                            # Buscar título
+                            title_elem = current_section.find(['h2', 'h3', 'a'])
+                            if not title_elem:
+                                continue
+                                
+                            title = title_elem.text.strip()
+                            
+                            # Buscar DOI
+                            doi = None
+                            doi_text = current_section.find(text=re.compile(r'10\.22514/jofph\.\d{4}\.\d{3}'))
+                            if doi_text:
+                                doi = doi_text.strip()
+                            
+                            # Buscar PDF
+                            pdf_elem = current_section.find('a', text='PDF')
+                            pdf_url = None
+                            if pdf_elem and pdf_elem.get('href'):
+                                pdf_url = pdf_elem['href']
+                                if not pdf_url.startswith('http'):
+                                    pdf_url = f"https://www.jofph.com{pdf_url}"
+                            
+                            # Extraer volumen e issue de la URL
+                            url_parts = url.split('/')[-1].split('-')
+                            volume = int(url_parts[0].replace('articles/', ''))
+                            issue = int(url_parts[1]) if len(url_parts) > 1 else 1
+                            
+                            if title and pdf_url:
+                                article_info = {
+                                    'title': title,
+                                    'doi': doi,
+                                    'pdf_url': pdf_url,
+                                    'volume': volume,
+                                    'issue': issue,
+                                    'section': section
+                                }
+                                articles.append(article_info)
+                                st.write(f"Artículo encontrado: {title}")
+                
+                # Debug: mostrar estructura HTML
+                st.write("Estructura de la página:")
+                sections_found = soup.find_all(['h1', 'h2', 'h3'])
+                for section in sections_found[:5]:  # Mostrar primeros 5 encabezados
+                    st.write(f"Encabezado encontrado: {section.text.strip()}")
+                
+                st.write(f"Total artículos encontrados: {len(articles)}")
+                return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            with httpx.Client(headers=self.headers) as client:
+                response = client.get(pdf_url, follow_redirects=True)
+                response.raise_for_status()
+                
+                with open(filepath, 'wb') as f:
+                    f.write(response.content)
+                return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False
+Para usar este código, necesitas:
+
+bash
+
+Copy
+pip install httpx beautifulsoup4
+Y en requirements.txt:
+
+
+Copy
+httpx
+beautifulsoup4
+Los cambios principales son:
+
+Uso de httpx en lugar de requests-html
+Headers más completos para simular mejor un navegador
+Búsqueda por secciones específicas
+Más logging para debug
+También sería muy útil si pudieras:
+
+Abrir la página en tu navegador
+Presionar F12 para abrir las herramientas de desarrollo
+Ir a la pestaña "Network"
+Recargar la página y ver qué peticiones AJAX o XHR se realizan
+Compartir la URL de la API si ves alguna llamada que devuelva los datos de los artículos
+ Copy
+Retry
+
+

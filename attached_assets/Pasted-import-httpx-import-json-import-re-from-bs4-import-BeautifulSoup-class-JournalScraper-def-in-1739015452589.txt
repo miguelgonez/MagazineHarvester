@@ -1,0 +1,115 @@
+import httpx
+import json
+import re
+from bs4 import BeautifulSoup
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
+            'Accept': 'application/json',
+            'Referer': 'https://www.jofph.com/',
+            'Origin': 'https://www.jofph.com'
+        }
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            # Extraer volumen e issue de la URL
+            match = re.search(r'(\d+)-(\d+)', url)
+            if not match:
+                st.error("URL no válida. Debe contener volumen-issue (ejemplo: 38-1)")
+                return []
+                
+            volume, issue = match.groups()
+            
+            # URL de la API
+            api_url = f"https://www.jofph.com/api/articles?volume={volume}&issue={issue}"
+            st.write(f"Intentando API: {api_url}")
+            
+            with httpx.Client(headers=self.headers, follow_redirects=True) as client:
+                # Primera petición para obtener los datos
+                response = client.get(api_url)
+                st.write(f"Status code API: {response.status_code}")
+                
+                if response.status_code != 200:
+                    st.error(f"Error accediendo a la API: {response.status_code}")
+                    # Intentar fallback a la página HTML
+                    response = client.get(url)
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    st.write("Fallback a HTML...")
+                else:
+                    try:
+                        data = response.json()
+                        articles = []
+                        
+                        for article in data.get('articles', []):
+                            article_info = {
+                                'title': article.get('title'),
+                                'doi': article.get('doi'),
+                                'pdf_url': article.get('pdf_url'),
+                                'volume': int(volume),
+                                'issue': int(issue)
+                            }
+                            articles.append(article_info)
+                            st.write(f"Artículo encontrado: {article_info['title']}")
+                            
+                        st.write(f"Total artículos encontrados: {len(articles)}")
+                        return articles
+                        
+                    except json.JSONDecodeError:
+                        st.error("Error decodificando respuesta JSON")
+                        st.write(response.text[:500])  # Debug
+                
+                # Si llegamos aquí, intentemos buscar en el HTML estático
+                articles = []
+                containers = soup.find_all('div', {'class': ['article-item', 'paper-item']})
+                
+                for container in containers:
+                    try:
+                        title = container.find(['h2', 'h3']).text.strip() if container.find(['h2', 'h3']) else None
+                        doi = container.find(text=re.compile(r'10\.22514/jofph\.\d{4}\.\d{3}'))
+                        pdf_link = container.find('a', text='PDF')
+                        
+                        if title and pdf_link:
+                            pdf_url = pdf_link['href']
+                            if not pdf_url.startswith('http'):
+                                pdf_url = f"https://www.jofph.com{pdf_url}"
+                                
+                            article_info = {
+                                'title': title,
+                                'doi': doi.strip() if doi else None,
+                                'pdf_url': pdf_url,
+                                'volume': int(volume),
+                                'issue': int(issue)
+                            }
+                            articles.append(article_info)
+                            st.write(f"Artículo encontrado: {title}")
+                    
+                    except Exception as e:
+                        st.write(f"Error procesando artículo: {str(e)}")
+                        continue
+                
+                st.write(f"Total artículos encontrados: {len(articles)}")
+                return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            with httpx.Client(headers=self.headers) as client:
+                response = client.get(pdf_url)
+                response.raise_for_status()
+                
+                with open(filepath, 'wb') as f:
+                    f.write(response.content)
+                return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False

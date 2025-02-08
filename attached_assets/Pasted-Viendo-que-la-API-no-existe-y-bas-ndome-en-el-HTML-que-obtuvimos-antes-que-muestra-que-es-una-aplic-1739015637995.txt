@@ -1,0 +1,127 @@
+Viendo que la API no existe y basándome en el HTML que obtuvimos antes (que muestra que es una aplicación Nuxt.js), vamos a intentar una aproximación diferente usando requests con headers más específicos y buscando el contenido directamente en el HTML:
+pythonCopyimport requests
+from bs4 import BeautifulSoup
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-User': '?1',
+            'Sec-Fetch-Dest': 'document'
+        }
+        self.session = requests.Session()
+
+    def get_articles_from_url(self, url):
+        try:
+            if not url.startswith('http'):
+                url = f'https://{url}'
+
+            st.write(f"Accediendo a: {url}")
+            
+            # Primera petición para obtener cookies y posibles tokens
+            response = self.session.get('https://www.jofph.com/', headers=self.headers)
+            time.sleep(1)  # Pequeña pausa
+            
+            # Petición a la página del volumen
+            response = self.session.get(url, headers=self.headers)
+            st.write(f"Status code: {response.status_code}")
+
+            soup = BeautifulSoup(response.text, 'html.parser')
+
+            # Extraer info del volumen
+            volume_match = re.search(r'/(\d+)-(\d+)$', url)
+            if volume_match:
+                volume = volume_match.group(1)
+                issue = volume_match.group(2)
+            else:
+                st.error("No se pudo extraer volumen/issue de la URL")
+                return []
+
+            articles = []
+            
+            # Buscar artículos en el HTML
+            article_sections = soup.find_all(['div', 'article'], {'id': lambda x: x and 'article-' in str(x).lower()})
+            if not article_sections:
+                # Intento alternativo buscando por estructura
+                article_sections = soup.find_all('div', class_=lambda x: x and any(term in str(x).lower() for term in ['article', 'paper', 'content']))
+
+            st.write(f"Secciones de artículos encontradas: {len(article_sections)}")
+
+            # Mostrar parte del HTML para debug
+            st.write("Ejemplo de estructura HTML encontrada:")
+            if len(soup.find_all('h2')) > 0:
+                st.code(str(soup.find_all('h2')[0].parent)[:500])
+
+            for section in article_sections:
+                try:
+                    # Buscar título
+                    title_elem = section.find(['h2', 'h3', 'h4', 'a'])
+                    if not title_elem:
+                        continue
+
+                    title = title_elem.get_text(strip=True)
+                    
+                    # Buscar DOI
+                    doi_pattern = r'10\.22514/jofph\.\d{4}\.\d{3}'
+                    doi_match = re.search(doi_pattern, str(section))
+                    doi = doi_match.group(0) if doi_match else None
+                    
+                    # Buscar PDF
+                    pdf_link = section.find('a', string=lambda s: s and 'PDF' in s)
+                    if not pdf_link:
+                        pdf_link = section.find('a', href=lambda h: h and '.pdf' in h.lower())
+                    
+                    if pdf_link and pdf_link.get('href'):
+                        pdf_url = pdf_link['href']
+                        if not pdf_url.startswith('http'):
+                            pdf_url = f"https://www.jofph.com{pdf_url}"
+                            
+                        article_info = {
+                            'title': title,
+                            'doi': doi,
+                            'pdf_url': pdf_url,
+                            'volume': int(volume),
+                            'issue': int(issue)
+                        }
+                        articles.append(article_info)
+                        st.write(f"Artículo encontrado: {title}")
+
+                except Exception as e:
+                    st.write(f"Error procesando artículo: {str(e)}")
+                    continue
+
+            st.write(f"Total artículos encontrados: {len(articles)}")
+            return articles
+
+        except Exception as e:
+            st.error(f"Error en get_articles_from_url: {str(e)}")
+            raise
+
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            st.error(f"Error descargando PDF: {str(e)}")
+            return False
+¿Podrías por favor hacer lo siguiente?:
+
+Abrir el inspector del navegador (F12)
+En la pestaña "Elements", buscar un artículo
+Hacer clic derecho sobre él y seleccionar "Copy > Copy outerHTML"
+Compartir ese HTML para que pueda ver exactamente cómo está estructurado un artículo en la página

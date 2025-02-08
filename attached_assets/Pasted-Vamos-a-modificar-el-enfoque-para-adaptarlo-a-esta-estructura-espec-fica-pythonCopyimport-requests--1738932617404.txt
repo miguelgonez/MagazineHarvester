@@ -1,0 +1,59 @@
+Vamos a modificar el enfoque para adaptarlo a esta estructura específica:
+pythonCopyimport requests
+from bs4 import BeautifulSoup
+import time
+
+def get_available_volumes():
+    try:
+        url = "https://www.mrepublications.com/jofph/archive"  # URL actualizada
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5'
+        }
+        
+        response = requests.get(url, headers=headers)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Buscar los volúmenes basándonos en la estructura que vemos en la imagen
+            volumes = []
+            
+            # Cada volumen tiene una estructura como "Vol.38,Issue 1,March 2024"
+            volume_items = soup.find_all('div', class_='issue-item')  # Ajusta el selector según la estructura real
+            
+            for item in volume_items:
+                volume_info = {
+                    'title': item.find('h2').text.strip(),
+                    'issue_number': item.find('span', class_='issue-number').text.strip(),
+                    'date': item.find('span', class_='date').text.strip(),
+                    'pdf_link': item.find('a', text='PDF')['href'] if item.find('a', text='PDF') else None
+                }
+                volumes.append(volume_info)
+            
+            return volumes
+            
+    except Exception as e:
+        print(f"Error detallado: {str(e)}")
+        raise Exception(f"Error fetching volumes: {str(e)}")
+
+# Función adicional para descargar PDFs
+def download_pdf(pdf_url, filename):
+    try:
+        response = requests.get(pdf_url, stream=True)
+        if response.status_code == 200:
+            with open(filename, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+    except Exception as e:
+        print(f"Error downloading PDF: {str(e)}")
+        return False
+La estructura que vemos en las imágenes es más clara:
+
+Cada volumen tiene un formato claro (Vol.38,Issue X)
+Los PDFs son accesibles directamente
+Hay una estructura clara de navegación por volumen/número

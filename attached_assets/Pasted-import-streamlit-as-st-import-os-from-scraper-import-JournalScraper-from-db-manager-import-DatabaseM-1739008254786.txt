@@ -1,0 +1,199 @@
+import streamlit as st
+import os
+from scraper import JournalScraper
+from db_manager import DatabaseManager
+from chat_manager import ChatManager
+import time
+import re
+import PyPDF2
+
+# Initialize session state variables
+if 'download_status' not in st.session_state:
+    st.session_state.download_status = {}
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = {}
+
+# Page configuration
+st.set_page_config(
+    page_title="Journal PDF Downloader",
+    page_icon="📚",
+    layout="wide"
+)
+
+# Ensure 'pdfs' directory exists
+os.makedirs('pdfs', exist_ok=True)
+
+# Initialize components
+db = DatabaseManager('journal_downloads.db')
+scraper = JournalScraper()
+chat_manager = ChatManager()
+
+def extract_pdf_text(pdf_path: str) -> str:
+    """Extract text from a PDF file."""
+    try:
+        with open(pdf_path, 'rb') as file:
+            reader = PyPDF2.PdfReader(file)
+            text = ""
+            for page in reader.pages:
+                text += page.extract_text() + "\n"
+            return text
+    except Exception as e:
+        st.error(f"Error extracting PDF text: {e}") # More informative error message
+        return ""
+
+def main():
+    st.title("📚 Journal PDF Downloader")
+
+    # Tabs for different functionalities
+    tab1, tab2 = st.tabs(["Download PDFs", "Chat with PDFs"])
+
+    with tab1:
+        st.markdown("""
+        Enter the URL of the volume you want to download.
+        Example: www.jofph.com/articles/38-1
+        """)
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            url = st.text_input(
+                "Volume URL:", # Changed label to English for consistency, you can keep Spanish if preferred.
+                placeholder="www.jofph.com/articles/38-1"
+            )
+
+            if url:
+                try:
+                    with st.spinner('Loading available articles...'): # Changed to English for consistency
+                        articles = scraper.get_articles_from_url(url)
+
+                    if articles:
+                        st.subheader(f"Available Articles ({len(articles)})")
+
+                        # Button to download all PDFs
+                        if st.button("Download All PDFs"): # Changed to English for consistency
+                            for article in articles:
+                                try:
+                                    with st.spinner(f'Downloading: {article["title"]}'): # Changed to English for consistency
+                                        volume_dir = os.path.join('pdfs', f'volume_{article["volume"]}')
+                                        os.makedirs(volume_dir, exist_ok=True) # Use exist_ok=True to avoid errors if directory exists
+
+                                        filename = f"vol_{article['volume']}_issue_{article['issue']}_{article['doi'].replace('/', '_') if article['doi'] else 'article'}.pdf"
+                                        filepath = os.path.join(volume_dir, filename)
+
+                                        if not os.path.exists(filepath):
+                                            success = scraper.download_pdf(article['pdf_url'], filepath)
+                                            if success:
+                                                db.add_download(article['volume'], article['issue'], filepath)
+                                                st.success(f"✅ Downloaded: {filename}") # Changed to English for consistency
+                                            else:
+                                                st.error(f"❌ Error downloading: {filename}") # Changed to English for consistency
+                                        else:
+                                            st.info(f"📄 Already exists: {filename}") # Changed to English for consistency
+                                except Exception as e:
+                                    st.error(f"Error: {e}") # More informative error message
+
+                        # List individual articles
+                        for article in articles:
+                            with st.container():
+                                st.markdown(f"**{article['title']}**")
+                                if article['doi']:
+                                    st.markdown(f"DOI: {article['doi']}")
+
+                                if st.button(f"Download PDF", key=f"btn_{article['doi'] or article['title']}"): # Changed to English for consistency
+                                    try:
+                                        with st.spinner('Downloading PDF...'): # Changed to English for consistency
+                                            volume_dir = os.path.join('pdfs', f'volume_{article["volume"]}')
+                                            os.makedirs(volume_dir, exist_ok=True) # Use exist_ok=True
+
+                                            filename = f"vol_{article['volume']}_issue_{article['issue']}_{article['doi'].replace('/', '_') if article['doi'] else 'article'}.pdf"
+                                            filepath = os.path.join(volume_dir, filename)
+
+                                            if not os.path.exists(filepath):
+                                                success = scraper.download_pdf(article['pdf_url'], filepath)
+                                                if success:
+                                                    db.add_download(article['volume'], article['issue'], filepath)
+                                                    st.success(f"PDF downloaded successfully: {filename}") # Changed to English for consistency
+                                                else:
+                                                    st.error("Error downloading the PDF") # Changed to English for consistency
+                                            else:
+                                                st.info(f"File already exists: {filename}") # Changed to English for consistency
+                                    except Exception as e:
+                                        st.error(f"Error: {e}") # More informative error message
+                                    st.markdown("---")
+                    else:
+                        st.warning("No articles found at this URL") # Changed to English for consistency
+
+                except Exception as e:
+                    st.error(f"Error loading articles: {e}") # More informative error message
+
+        with col2:
+            st.subheader("Statistics") # Changed to English for consistency
+            stats = db.get_statistics()
+            st.metric("Total Downloads", stats['total_downloads']) # Changed to English for consistency
+            st.metric("Total Volumes", stats['total_volumes']) # Changed to English for consistency
+            st.metric("Success Rate", f"{stats['success_rate']:.1f}%") # Changed to English for consistency
+
+            st.subheader("Download History") # Changed to English for consistency
+            history = db.get_download_history(5)
+            for entry in history:
+                st.text(f"Volume {entry[0]}, Issue {entry[1]} - {entry[2]}")
+
+    with tab2:
+        st.subheader("💬 Chat with PDFs") # Changed to English for consistency
+
+        # List available PDFs
+        pdf_files = []
+        for root, dirs, files in os.walk('pdfs'):
+            for file in files:
+                if file.endswith('.pdf'):
+                    pdf_files.append(os.path.join(root, file))
+
+        if not pdf_files:
+            st.warning("No PDFs available. Please download some papers first.") # Changed to English for consistency
+            return
+
+        # Select PDF to chat about
+        selected_pdf = st.selectbox(
+            "Select a PDF to chat about:", # Changed to English for consistency
+            pdf_files,
+            format_func=lambda x: os.path.basename(x)
+        )
+
+        if selected_pdf:
+            # Create columns for chat interface
+            chat_col, history_col = st.columns([2, 1])
+
+            with chat_col:
+                # Chat interface
+                user_message = st.text_area("Ask a question about the paper:", height=100) # Changed to English for consistency
+
+                if st.button("Send"): # Changed to English for consistency
+                    if not os.environ.get("OPENAI_API_KEY"):
+                        st.error("Please set the OPENAI_API_KEY environment variable.") # Changed to English for consistency
+                        return
+
+                    with st.spinner("Processing your question..."): # Changed to English for consistency
+                        # Extract text from PDF
+                        pdf_text = extract_pdf_text(selected_pdf)
+                        if pdf_text:
+                            # Get response from ChatGPT
+                            response = chat_manager.chat_with_pdf(pdf_text, user_message)
+                            # Store in database
+                            db.add_chat_history(selected_pdf, user_message, response)
+                            # Show response
+                            st.write("Response:", response) # Changed to English for consistency
+                        else:
+                            st.error("Could not extract text from the PDF.") # Changed to English for consistency
+
+            with history_col:
+                # Show chat history
+                st.subheader("Chat History") # Changed to English for consistency
+                history = db.get_chat_history(selected_pdf)
+                for msg in history:
+                    with st.expander(f"Q: {msg[0][:50]}..."): # Changed to English for consistency
+                        st.write("Question:", msg[0]) # Changed to English for consistency
+                        st.write("Answer:", msg[1]) # Changed to English for consistency
+                        st.write("Time:", msg[2]) # Changed to English for consistency
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,73 @@
+import requests
+from bs4 import BeautifulSoup
+import time
+import re
+
+class JournalScraper:
+    def __init__(self):
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        }
+        self.session = requests.Session()
+    
+    def get_articles_from_url(self, url):
+        try:
+            # Asegurarnos de que la URL es completa
+            if not url.startswith('http'):
+                url = f'https://{url}'
+                
+            print(f"Intentando acceder a: {url}")  # Debug
+            
+            response = self.session.get(url, headers=self.headers)
+            print(f"Status code: {response.status_code}")  # Debug
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            print(f"HTML obtenido con longitud: {len(response.text)}")  # Debug
+            
+            articles = []
+            
+            # Buscar secciones (Systematic reviews, Original Research, etc.)
+            for section in soup.find_all('div', recursive=True):
+                if section.find('h2') and 'Open Access' in section.text:
+                    print(f"Encontrada sección: {section.find('h2').text}")  # Debug
+                    
+                    article_info = {
+                        'title': section.find('a').text.strip() if section.find('a') else None,
+                        'doi': section.find(text=re.compile('10.22514/jofph')).strip() if section.find(text=re.compile('10.22514/jofph')) else None,
+                        'pdf_url': None,
+                        'volume': int(url.split('/')[-1].split('-')[0].replace('articles/', '')),
+                        'issue': int(url.split('/')[-1].split('-')[1])
+                    }
+                    
+                    # Buscar el enlace PDF
+                    pdf_elem = section.find('a', text='PDF')
+                    if pdf_elem and pdf_elem.get('href'):
+                        article_info['pdf_url'] = pdf_elem['href']
+                        if not article_info['pdf_url'].startswith('http'):
+                            article_info['pdf_url'] = f"https://www.jofph.com{article_info['pdf_url']}"
+                    
+                    print(f"Artículo encontrado: {article_info}")  # Debug
+                    
+                    if article_info['title'] and article_info['pdf_url']:
+                        articles.append(article_info)
+            
+            print(f"Total de artículos encontrados: {len(articles)}")  # Debug
+            return articles
+            
+        except Exception as e:
+            print(f"Error detallado en get_articles_from_url: {str(e)}")
+            raise
+    
+    def download_pdf(self, pdf_url, filepath):
+        try:
+            response = self.session.get(pdf_url, headers=self.headers, stream=True)
+            response.raise_for_status()
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+        except Exception as e:
+            print(f"Error downloading PDF: {str(e)}")
+            return False
